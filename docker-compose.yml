@@ -1,26 +1,80 @@
+version: '3.8'
+
 services:
+  # 1. Motor de Base de Datos Vacío (ADR-001 & Constitución Art. V)
   db:
     image: postgres:16-alpine
-    container_name: library-db
+    container_name: library_db
+    restart: unless-stopped
     environment:
+      POSTGRES_DB: ${DB_DATABASE:-library}
       POSTGRES_USER: ${DB_USERNAME:-library}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-library}
-      POSTGRES_DB: ${DB_DATABASE:-library}
     ports:
-      - "${DB_PORT:-5432}:5432"
+      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-library}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-library} -d ${DB_DATABASE:-library}"]
       interval: 5s
       timeout: 5s
       retries: 5
     networks:
-      - library-net
+      - library_net
 
-networks:
-  library-net:
-    driver: bridge
+  # 2. Backend Laravel API (T-20)
+  api:
+    build:
+      context: ../api
+      dockerfile: ../infra/Dockerfile.api
+    container_name: library_api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      APP_ENV: production
+      APP_KEY: base64:6mNYvUW75hlt+a2SFXOmVHfSBwHgRX28EHF+t6c99dQ=
+      APP_DEBUG: "false"
+      APP_URL: http://localhost:8000
+      DB_CONNECTION: pgsql
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_DATABASE: ${DB_DATABASE:-library}
+      DB_USERNAME: ${DB_USERNAME:-library}
+      DB_PASSWORD: ${DB_PASSWORD:-library}
+      DB_SCHEMA: library
+      JWT_SECRET: ${JWT_SECRET:-library-secret-key-at-least-32-chars-long!!}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin123*}
+      CORS_ORIGIN: http://localhost:5173
+    ports:
+      - "8000:8000"
+    volumes:
+      - covers_storage:/var/www/html/storage/app/covers
+    networks:
+      - library_net
+
+  # 3. Frontend React App (T-20)
+  app:
+    build:
+      context: ../app
+      dockerfile: ../infra/Dockerfile.app
+    container_name: library_app
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "5173:80"
+    networks:
+      - library_net
 
 volumes:
   pgdata:
+    driver: local
+  covers_storage:
+    driver: local
+
+networks:
+  library_net:
+    driver: bridge
